@@ -25,6 +25,9 @@
     background:var(--paper); display:flex;flex-direction:column;
     position:relative;overflow:hidden;
     box-shadow:0 30px 80px rgba(0,0,0,.55);border-radius:16px;
+    /* consumed by fitStage(): scale the fixed-size window up in fullscreen
+       rather than stranding it as a postage stamp on a large monitor */
+    transform:scale(var(--fs-scale,1));transform-origin:center center;
   }
   /* narrow screens: stack taller so bubbles have room */
   @media(max-width:620px){ .stage{width:100vw;height:100vh;border-radius:0} .bubble{max-width:80%} }
@@ -125,10 +128,27 @@
   .endlist li{font-size:13px;line-height:1.5;margin-bottom:9px;padding-left:18px;position:relative;list-style:none;opacity:.95}
   .endlist li::before{content:"";position:absolute;left:0;top:6px;width:8px;height:8px;border-radius:50%;background:var(--red)}
   .screen .btn-ghost{color:#fff;background:rgba(255,255,255,.1);border-color:rgba(255,255,255,.35)}
+
+  /* Fullscreen button — comic vocabulary: pill, ink border, hard offset
+     shadow, press-to-squash. A direct child of .stage at z-index 25, NOT in
+     the topbar: the intro and end .screen overlays sit at z-index 20 and would
+     bury a topbar button on exactly the screens a stuck learner needs it. */
+  .fs-btn{position:absolute;top:10px;inset-inline-end:14px;z-index:25;
+    display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 12px;
+    background:var(--sky);color:var(--navy);
+    border:2px solid var(--panel-border);border-radius:999px;
+    box-shadow:2px 2px 0 rgba(0,0,0,.28);
+    font-family:inherit;font-size:11.5px;font-weight:700;white-space:nowrap;cursor:pointer}
+  .fs-btn:active{transform:translate(1px,1px);box-shadow:1px 1px 0 rgba(0,0,0,.28)}
+  .fs-btn:focus-visible{outline:3px solid var(--red);outline-offset:2px}
+  .fs-btn.is-on{background:rgba(255,255,255,.14);color:#fff;
+    border-color:rgba(255,255,255,.4);box-shadow:none}
 </style>
 </head>
 <body>
 <div class="stage">
+
+  <button class="fs-btn" id="fsBtn" type="button" aria-pressed="false"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5"/></svg><span class="fs-label" aria-live="polite"></span></button>
 
   <div class="screen" id="intro">
     <div class="kicker" id="i-kicker"></div>
@@ -177,6 +197,9 @@
    New language = duplicate this file, translate the two objects, host.
    ========================================================================= */
 const STR = {
+  /* Fullscreen button. All four strings are shown to learners: hint and newtab
+     are the fallbacks for when the embed does not permit fullscreen. */
+  fs:{ enter:"Fullscreen", exit:"Exit fullscreen", newtab:"Open in a new tab", hint:"Press F11 to fill your screen" },
   kicker:"Discovery & Needs Analysis \u00b7 Show",
   title:"Jack's appointment",
   sub:"A complete Needs Analysis, told as a comic \u2014 from the first hello to the frame",
@@ -335,8 +358,13 @@ function advance(){
   if(waiting||done)return;
   idx++;
   if(idx>=LINES.length){finish();return;}
-  playLine(idx,()=>{
-    if(NOTICES[idx])showNotice(NOTICES[idx],()=>{});
+  /* Capture the beat index. The callback fires after the "thinking" delay,
+     so a learner who taps Next inside that window would otherwise have the
+     PREVIOUS beat's callback read the new idx, firing that beat's notice card
+     early and then again when its own callback lands. */
+  const i=idx;
+  playLine(i,()=>{
+    if(NOTICES[i])showNotice(NOTICES[i],()=>{});
   });
 }
 function finish(){done=true;setTimeout(()=>$("end").classList.remove("hidden"),700);}
@@ -348,6 +376,84 @@ document.addEventListener("keydown",e=>{
   if(!$("intro").classList.contains("hidden"))return;
   if(e.key===" "||e.key==="Enter"||e.key==="ArrowRight"){e.preventDefault();advance();}
 });
+
+/* ===== fullscreen =====
+   The stage sizes itself to whatever box it is embedded in, and we do not
+   control that box. An LMS iframe taller than the learner's visible area puts
+   the lower half of the activity below the fold, where nothing inside the
+   iframe can detect it. This is the escape hatch.
+
+   It degrades fullscreen -> new tab -> hint, because an LMS may rewrite or
+   strip allowfullscreen on the iframe tag. Ported from SANDBOXTEMPLATE; the
+   toast and i18n lookups it relied on do not exist here, so the labels come
+   from the activity's own copy object and the hint borrows the button label. */
+const FS = STR.fs;
+const FS_W = 920, FS_H = 620;
+const fsBtn = document.getElementById("fsBtn");
+const fsLabelEl = fsBtn && fsBtn.querySelector(".fs-label");
+const fsEl = () => document.fullscreenElement || document.webkitFullscreenElement || null;
+// false when the embedding iframe carries no allowfullscreen
+const fsSupported = !!(document.fullscreenEnabled || document.webkitFullscreenEnabled);
+// about:srcdoc, blob: and data: cannot be reopened as a top-level document
+const fsCanPopOut = /^https?:$/.test(location.protocol);
+let fsMode = fsSupported ? "fullscreen" : (fsCanPopOut ? "popout" : "hint");
+let fsHintTimer;
+
+function syncFsLabel(){
+  if(!fsBtn) return;
+  const on = !!fsEl();
+  const t = fsMode === "popout" ? FS.newtab : on ? FS.exit : FS.enter;
+  fsLabelEl.textContent = t; fsBtn.title = t;
+  fsBtn.classList.toggle("is-on", on);
+  // aria-pressed describes a toggle; in popout mode this is a one-way action,
+  // so drop the attribute rather than lie with "false"
+  if(fsMode === "popout") fsBtn.removeAttribute("aria-pressed");
+  else fsBtn.setAttribute("aria-pressed", on ? "true" : "false");
+}
+// there is no toast component in these activities, so the hint borrows the
+// button's own label for a few seconds
+function fsHint(){
+  if(!fsBtn) return;
+  fsLabelEl.textContent = FS.hint; fsBtn.title = FS.hint;
+  clearTimeout(fsHintTimer); fsHintTimer = setTimeout(syncFsLabel, 4000);
+}
+function fsDemote(){ fsMode = fsCanPopOut ? "popout" : "hint"; syncFsLabel(); fsHint(); }
+
+/* Scale the stage rather than stretch it. This is a fixed 920xH design, so
+   plain fullscreen on a large monitor would just centre a postage stamp in a
+   huge field and read as broken. Text scales as vectors and nothing reflows. */
+function fitStage(){
+  const st = document.querySelector(".stage"); if(!st) return;
+  const s = fsEl() ? Math.min(innerWidth / FS_W, innerHeight / FS_H) : 1;
+  st.style.setProperty("--fs-scale", Math.max(1, Math.min(2, s)).toFixed(3));
+}
+
+function toggleFullscreen(){
+  if(fsMode === "hint"){ fsHint(); return; }
+  if(fsMode === "popout"){
+    // returns null when the iframe is sandboxed without allow-popups
+    if(!window.open(location.href, "_blank", "noopener")){ fsMode = "hint"; fsDemote(); }
+    return;
+  }
+  if(fsEl()){ (document.exitFullscreen || document.webkitExitFullscreen).call(document); return; }
+  /* documentElement, NOT .stage: element fullscreen forces width/height:100%
+     over the fixed design and paints an opaque black ::backdrop, which would
+     replace the activity's own ground. */
+  const el = document.documentElement;
+  const req = el.requestFullscreen || el.webkitRequestFullscreen;
+  if(!req){ fsDemote(); return; }
+  // webkitRequestFullscreen returns undefined rather than a Promise, and a
+  // request can still be refused after fullscreenEnabled read true
+  Promise.resolve(req.call(el)).catch(fsDemote);
+}
+
+if(fsBtn) fsBtn.addEventListener("click", toggleFullscreen);
+/* The change event is the source of truth, never the click handler: Esc, F11,
+   a refused request and the window manager all change state without it. */
+["fullscreenchange","webkitfullscreenchange"].forEach(ev =>
+  document.addEventListener(ev, () => { syncFsLabel(); fitStage(); }));
+addEventListener("resize", fitStage);
+syncFsLabel(); fitStage();
 </script>
 </body>
 </html>
