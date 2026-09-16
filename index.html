@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Jack's Appointment — Discovery &amp; Needs Analysis</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Bangers&family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Bangers&family=Noto+Sans+Arabic:wght@400;600;700;800&family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
 <style>
   :root{
     --navy:#002856; --navy-deep:#001838; --red:#E4032E;
@@ -25,6 +25,9 @@
     background:var(--paper); display:flex;flex-direction:column;
     position:relative;overflow:hidden;
     box-shadow:0 30px 80px rgba(0,0,0,.55);border-radius:16px;
+    /* consumed by fitStage(): scale the fixed-size window up in fullscreen
+       rather than stranding it as a postage stamp on a large monitor */
+    transform:scale(var(--fs-scale,1));transform-origin:center center;
   }
   /* narrow screens: stack taller so bubbles have room */
   @media(max-width:620px){ .stage{width:100vw;height:100vh;border-radius:0} .bubble{max-width:80%} }
@@ -125,10 +128,59 @@
   .endlist li{font-size:13px;line-height:1.5;margin-bottom:9px;padding-left:18px;position:relative;list-style:none;opacity:.95}
   .endlist li::before{content:"";position:absolute;left:0;top:6px;width:8px;height:8px;border-radius:50%;background:var(--red)}
   .screen .btn-ghost{color:#fff;background:rgba(255,255,255,.1);border-color:rgba(255,255,255,.35)}
+
+  /* Fullscreen button — comic vocabulary: pill, ink border, hard offset
+     shadow, press-to-squash. A direct child of .stage at z-index 25, NOT in
+     the topbar: the intro and end .screen overlays sit at z-index 20 and would
+     bury a topbar button on exactly the screens a stuck learner needs it. */
+  .fs-btn{position:absolute;top:10px;inset-inline-end:14px;z-index:25;
+    display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 12px;
+    background:var(--sky);color:var(--navy);
+    border:2px solid var(--panel-border);border-radius:999px;
+    box-shadow:2px 2px 0 rgba(0,0,0,.28);
+    font-family:inherit;font-size:11.5px;font-weight:700;white-space:nowrap;cursor:pointer}
+  .fs-btn:active{transform:translate(1px,1px);box-shadow:1px 1px 0 rgba(0,0,0,.28)}
+  .fs-btn:focus-visible{outline:3px solid var(--red);outline-offset:2px}
+  .fs-btn.is-on{background:rgba(255,255,255,.14);color:#fff;
+    border-color:rgba(255,255,255,.4);box-shadow:none}
+
+  /* language switcher — on the intro screen, where there is room and where a
+     learner chooses once. ?lang= stays the primary mechanism for LMS embeds. */
+  .langbar{margin:0 0 14px}
+  .langbar select{font:inherit;font-size:12.5px;font-weight:700;color:#fff;
+    background:rgba(255,255,255,.12);border:2px solid rgba(255,255,255,.35);
+    border-radius:999px;padding:6px 14px;cursor:pointer}
+  .langbar select:focus-visible{outline:3px solid var(--red);outline-offset:2px}
+  .langbar option{color:#132441}
+
+  /* ---------- right-to-left (Arabic) ----------
+     Reading-order chrome (rail, topbar row, controls, list bullets) flips on
+     its own via flex and logical properties. Anything anchored to the
+     photograph does NOT: Ana is on the left of frame and Jack on the right,
+     so their bubbles, nameplates and the speaker spotlight stay with the
+     people. Under dir=rtl the cross-axis flex-start/flex-end of .bubbles
+     would otherwise swap the two speakers over and point each tail at the
+     wrong person.
+
+     Bangers is Latin-only, so Arabic set in it silently falls back to
+     whatever the OS picks and reads as a different design. */
+  [dir="rtl"] body,[dir="rtl"] .bubble,[dir="rtl"] .screen,
+  [dir="rtl"] .card,[dir="rtl"] .btn{font-family:'Noto Sans Arabic','Segoe UI',Tahoma,system-ui,sans-serif}
+  [dir="rtl"] .nameplate,[dir="rtl"] .cap,[dir="rtl"] .bubble .sp,
+  [dir="rtl"] .bubble.thinking,[dir="rtl"] .card h3,[dir="rtl"] .screen h1{
+    font-family:'Noto Sans Arabic','Segoe UI',Tahoma,system-ui,sans-serif;
+    font-weight:800;letter-spacing:0}
+  [dir="rtl"] .screen h1{font-size:30px;line-height:1.25}
+  [dir="rtl"] .cap{font-size:12.5px}
+  [dir="rtl"] .seg .lab{font-size:8.2px}
+  [dir="rtl"] .bubble.ana{align-self:flex-end}
+  [dir="rtl"] .bubble.jack{align-self:flex-start}
 </style>
 </head>
 <body>
 <div class="stage">
+
+  <button class="fs-btn" id="fsBtn" type="button" aria-pressed="false"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5"/></svg><span class="fs-label" aria-live="polite"></span></button>
 
   <div class="screen" id="intro">
     <div class="kicker" id="i-kicker"></div>
@@ -136,6 +188,7 @@
     <h2 id="i-sub"></h2>
     <p id="i-body"></p>
     <div class="persona" id="i-persona"></div>
+    <div class="langbar"><select id="langsel" aria-label="Language"></select></div>
     <button class="btn btn-red" id="i-start"></button>
   </div>
 
@@ -176,86 +229,580 @@
    TRANSLATION LAYER — everything a translator touches lives in STR + LINES.
    New language = duplicate this file, translate the two objects, host.
    ========================================================================= */
-const STR = {
-  kicker:"Discovery & Needs Analysis \u00b7 Show",
+/* =========================================================================
+   I18N — every language lives in this one file.
+
+   Structure is declared ONCE in BEATS (who speaks, which phase, whether the
+   panel carries a caption). Only text is per-language, as flat collections:
+     lines[i] — what the speaker says at panel i     (38 entries)
+     caps[i]  — the caption on panel i               (19 entries, keyed)
+     notes[k] — the interlude card bullets after k   (keys 11 and 25)
+   Six copies of the full object tree would invite structural drift, so the
+   shape is shared and the translator edits flat text.
+
+   Language comes from ?lang=xx, then the browser, then English. For an LMS
+   embed use one localized embed per course language:
+       .../show_comic.html?lang=pt
+   ========================================================================= */
+
+/* who: 0 = Ana (left of frame), 1 = Jack (right of frame) */
+const BEATS = [
+  {phase:0,who:0,cap:1},{phase:0,who:1},{phase:0,who:0,cap:1},{phase:0,who:1},
+  {phase:1,who:0,cap:1},{phase:1,who:1},{phase:1,who:0,cap:1},{phase:1,who:1},
+  {phase:1,who:0,cap:1},{phase:1,who:1},{phase:1,who:0,cap:1},{phase:1,who:1},
+  {phase:2,who:0,cap:1},{phase:2,who:1},{phase:2,who:0,cap:1},{phase:2,who:1},
+  {phase:3,who:0,cap:1},{phase:3,who:1},{phase:3,who:0,cap:1},{phase:3,who:1},
+  {phase:4,who:0,cap:1},{phase:4,who:1},{phase:4,who:0,cap:1},{phase:4,who:1},
+  {phase:4,who:0,cap:1},{phase:4,who:1},
+  {phase:5,who:0,cap:1},{phase:5,who:1},{phase:5,who:0,cap:1},{phase:5,who:1},
+  {phase:5,who:0,cap:1},{phase:5,who:1},{phase:5,who:0,cap:1},{phase:5,who:1},
+  {phase:6,who:0,cap:1},{phase:6,who:1},{phase:6,who:0,cap:1},{phase:6,who:1}
+];
+
+const I18N = {
+
+/* ---------------------------------------------------------------- English */
+en:{
+  fs:{ enter:"Fullscreen", exit:"Exit fullscreen", newtab:"Open in a new tab", hint:"Press F11 to fill your screen" },
+  kicker:"Discovery & Needs Analysis · Show",
   title:"Jack's appointment",
-  sub:"A complete Needs Analysis, told as a comic \u2014 from the first hello to the frame",
-  intro:"Jack came into the Center for his first appointment. Ana, the Consultant, welcomes him. Follow the conversation panel by panel \u2014 the red captions name the phase and the technique as they happen.",
-  persona:"<b>Jack \u2014 IT Manager, 34.</b> Three years of school English, some courses at work, never any progress. You will discover the rest the same way Ana does: by asking.",
+  sub:"A complete Needs Analysis, told as a comic — from the first hello to the frame",
+  intro:"Jack came into the Center for his first appointment. Ana, the Consultant, welcomes him. Follow the conversation panel by panel — the red captions name the phase and the technique as they happen.",
+  persona:"<b>Jack — IT Manager, 34.</b> Three years of school English, some courses at work, never any progress. You will discover the rest the same way Ana does: by asking.",
   start:"Start the appointment",
   topTitle:"Jack's appointment",
-  nameAna:"ANA", nameJack:"JACK",
-  spAna:"ANA", spJack:"JACK",
-  modeAuto:"Auto \u25b8", modeTap:"Tap", next:"Next", cont:"Continue",
+  nameAna:"ANA", nameJack:"JACK", spAna:"ANA", spJack:"JACK",
+  modeAuto:"Auto ▸", modeTap:"Tap", next:"Next", cont:"Continue",
   speed:["Slow","Normal","Fast"],
   hintAuto:"The story plays by itself. Switch to Tap to control the pace.",
   hintTap:"Press Next (or the space bar) for each panel.",
-  noticeTitle:"NOTICE HOW\u2026",
+  noticeTitle:"NOTICE HOW…",
   endKicker:"End of the appointment",
   endTitle:"That's a Needs Analysis!",
   endSub:"Seven phases, one natural conversation",
   endBullets:[
-    "Look back and count who talked more. Jack \u2014 by far. That is the 80/20 rule.",
-    "The Hot Button came from one question: \u201cWhy now?\u201d \u2014 and it was emotional. The promotion is the rational reason; the fear of making mistakes is the real one.",
+    "Look back and count who talked more. Jack — by far. That is the 80/20 rule.",
+    "The Hot Button came from one question: “Why now?” — and it was emotional. The promotion is the rational reason; the fear of making mistakes is the real one.",
     "Ana never mentioned prices or course details. She confirmed positively, created curiosity, and framed the next steps.",
-    "Now it's your turn: return to the course for two short questions \u2014 then you'll run your own appointment, with Jill."
+    "Now it's your turn: return to the course for two short questions — then you'll run your own appointment, with Jill."
   ],
   replay:"Read it again",
-  phases:["Ice","Past","Present","Future","General","Hot Btn","Framing"]
+  phases:["Ice","Past","Present","Future","General","Hot Btn","Framing"],
+  lines:[
+    "Hello Jack — welcome to Wall Street English. I'm Ana. Did you find us easily?",
+    "Yes, thanks. The Center is easy to find.",
+    "I'm glad. Please, sit down. Before we start — how much do you already know about us?",
+    "Not very much. I saw your website, and a colleague mentioned you once.",
+    "Then I'll make sure you leave knowing everything you need. But first, I'd love to hear about you. How much English have you studied in the past?",
+    "Three years at school, a long time ago. And my company organized some courses at work.",
+    "How were those work courses for you?",
+    "Honestly? Not great. I never felt I was making progress.",
+    "I understand — that happens to many people. Was it the method, or was it hard to stay motivated?",
+    "Both, I think. The classes were big, and after work I was tired.",
+    "So understanding isn't the problem — speaking is where you want to grow. Have I understood you right?",
+    "Exactly. I understand a lot, but speaking… that's the hard part.",
+    "Tell me about now. How much time could you give to English in a normal week?",
+    "Once a week, realistically. I travel a lot for work.",
+    "That's good to know — and it's no problem. We have flexible ways to study that work well for people who travel. I'll show you how, in a few minutes.",
+    "That would be good.",
+    "And looking ahead — how good would you like your English to be?",
+    "I want to speak fluently. Not perfect, but confident.",
+    "Confident speaking. And what will you use it for, mainly?",
+    "Work, mostly. Meetings, and calls with our other offices.",
+    "You said you travel a lot — what do you do, if I may ask?",
+    "I'm an IT manager. And in my free time I play video games online with people from all over the world.",
+    "So you already meet people from everywhere! In English?",
+    "I try! I type more than I speak. My son laughs at my pronunciation.",
+    "How old is your son?",
+    "Eight. His English is already better than mine, I think.",
+    "A good training partner at home! Jack — you've needed English at work for years. Why now? What made you come in this week?",
+    "Well… there's a promotion coming. International IT manager. I'd be leading people in different countries.",
+    "That sounds like a big opportunity. How do you feel about it?",
+    "Excited. And afraid, honestly. I'm afraid to speak and make mistakes in front of people. If my English isn't good enough, I won't get the role.",
+    "Thank you for being so honest, Jack. That fear of making mistakes — many of our students started right there, and it's something we work on directly. You won't be alone with it.",
+    "That's good to hear.",
+    "And if the promotion works out — what would it mean for you and your family?",
+    "A lot. More responsibility, a better salary. And I'd travel with confidence instead of stress.",
+    "That's a very clear picture. Here's what we'll do next: a short test to see your level today, then we'll look at how the course works, and then we'll find the right options — with prices — for your goal. Does that sound good?",
+    "Yes, that sounds very good.",
+    "Perfect. Thank you for telling me your story, Jack. I'm confident we can get you ready for that promotion.",
+    "Thank you, Ana."
+  ],
+  caps:{
+    0:"!Breaking the Ice", 2:"Warm welcome",
+    4:"!The Past · open question", 6:"Follow-up question", 8:"Clarifying question", 10:"Verbal: summarizing",
+    12:"!The Present · open question", 14:"Positive confirmation + curiosity",
+    16:"!The Future · open question", 18:"Follow-up question",
+    20:"!General Conversation", 22:"Showing real interest", 24:"A human moment",
+    26:"!The Hot Button — the key question", 28:"GREEN: Explore",
+    30:"Empathy — the Hot Button is heard", 32:"GREEN: Expand",
+    34:"!Framing", 36:"Positive close"
+  },
+  notes:{
+    11:["In the Center, Breaking the Ice is eye contact, a smile and a warm welcome.",
+        "When Jack said he made no progress, Ana didn't move on. She asked a follow-up, then a clarifying question.",
+        "Before changing topic, Ana summarized — and checked she'd understood. Jack felt heard."],
+    25:["When flexibility came up, Ana confirmed positively and created curiosity — no prices, no details yet.",
+        "General Conversation grew naturally out of Jack's job and his games. Brief, human, and back to English by itself."]
+  }
+},
+
+/* ---------------------------------------------------------------- Italiano */
+it:{
+  fs:{ enter:"Schermo intero", exit:"Esci da schermo intero", newtab:"Apri in una nuova scheda", hint:"Premi F11 per riempire lo schermo" },
+  kicker:"Scoperta e analisi dei bisogni · Guarda",
+  title:"L'appuntamento di Jack",
+  sub:"Un'analisi dei bisogni completa, raccontata a fumetti — dal primo saluto all'inquadramento",
+  intro:"Jack è venuto in Centro per il suo primo appuntamento. Ana, la Consulente, lo accoglie. Segui la conversazione vignetta per vignetta — le didascalie rosse indicano la fase e la tecnica nel momento in cui accadono.",
+  persona:"<b>Jack — IT Manager, 34 anni.</b> Tre anni di inglese a scuola, qualche corso al lavoro, mai nessun progresso. Il resto lo scoprirai come lo scopre Ana: facendo domande.",
+  start:"Inizia l'appuntamento",
+  topTitle:"L'appuntamento di Jack",
+  nameAna:"ANA", nameJack:"JACK", spAna:"ANA", spJack:"JACK",
+  modeAuto:"Auto ▸", modeTap:"Tocca", next:"Avanti", cont:"Continua",
+  speed:["Lento","Normale","Veloce"],
+  hintAuto:"La storia va avanti da sola. Passa a Tocca per controllare il ritmo.",
+  hintTap:"Premi Avanti (o la barra spaziatrice) per ogni vignetta.",
+  noticeTitle:"NOTA COME…",
+  endKicker:"Fine dell'appuntamento",
+  endTitle:"Questa è un'analisi dei bisogni!",
+  endSub:"Sette fasi, una conversazione naturale",
+  endBullets:[
+    "Torna indietro e conta chi ha parlato di più. Jack — di gran lunga. Questa è la regola 80/20.",
+    "Il Hot Button è emerso da una sola domanda: «Perché adesso?» — ed era emotivo. La promozione è la ragione razionale; la paura di sbagliare è quella vera.",
+    "Ana non ha mai parlato di prezzi né di dettagli del corso. Ha confermato in positivo, ha creato curiosità e ha inquadrato i passi successivi.",
+    "Ora tocca a te: torna al corso per due brevi domande — poi condurrai il tuo appuntamento, con Jill."
+  ],
+  replay:"Leggi di nuovo",
+  phases:["Ghiaccio","Passato","Presente","Futuro","Generale","Hot Btn","Inquadrare"],
+  lines:[
+    "Buongiorno Jack — benvenuto in Wall Street English. Io sono Ana. Ci ha trovati facilmente?",
+    "Sì, grazie. Il Centro è facile da trovare.",
+    "Mi fa piacere. Prego, si accomodi. Prima di cominciare — quanto già conosce di noi?",
+    "Non molto. Ho visto il vostro sito e una collega me ne ha parlato una volta.",
+    "Allora farò in modo che esca di qui sapendo tutto quello che le serve. Ma prima mi piacerebbe sapere di lei. Quanto inglese ha studiato in passato?",
+    "Tre anni a scuola, molto tempo fa. E la mia azienda ha organizzato qualche corso al lavoro.",
+    "Come sono andati quei corsi aziendali per lei?",
+    "Sinceramente? Non benissimo. Non ho mai avuto la sensazione di fare progressi.",
+    "La capisco — succede a molte persone. Era il metodo, o era difficile restare motivato?",
+    "Entrambe le cose, credo. Le classi erano numerose e dopo il lavoro ero stanco.",
+    "Quindi il problema non è capire — è parlare che vuole migliorare. Ho capito bene?",
+    "Esatto. Capisco molto, ma parlare… quella è la parte difficile.",
+    "Mi parli di adesso. Quanto tempo potrebbe dedicare all'inglese in una settimana normale?",
+    "Una volta a settimana, realisticamente. Viaggio molto per lavoro.",
+    "È utile saperlo — e non è un problema. Abbiamo modi flessibili di studiare che funzionano bene per chi viaggia. Le mostrerò come, tra pochi minuti.",
+    "Sarebbe ottimo.",
+    "E guardando avanti — quanto vorrebbe che fosse buono il suo inglese?",
+    "Voglio parlare in modo fluente. Non perfetto, ma con sicurezza.",
+    "Parlare con sicurezza. E per che cosa lo userà, principalmente?",
+    "Soprattutto per lavoro. Riunioni e chiamate con le nostre altre sedi.",
+    "Ha detto che viaggia molto — di che cosa si occupa, se posso chiederlo?",
+    "Sono un IT manager. E nel tempo libero gioco ai videogiochi online con persone di tutto il mondo.",
+    "Quindi incontra già persone da ogni parte del mondo! In inglese?",
+    "Ci provo! Scrivo più di quanto parli. Mio figlio ride della mia pronuncia.",
+    "Quanti anni ha suo figlio?",
+    "Otto. Il suo inglese è già migliore del mio, credo.",
+    "Un bel compagno di allenamento in casa! Jack — le serve l'inglese al lavoro da anni. Perché adesso? Che cosa l'ha portata qui questa settimana?",
+    "Beh… sta per arrivare una promozione. IT manager internazionale. Guiderei persone in diversi Paesi.",
+    "Sembra una grande opportunità. Come si sente al riguardo?",
+    "Entusiasta. E spaventato, sinceramente. Ho paura di parlare e di sbagliare davanti agli altri. Se il mio inglese non è abbastanza buono, non otterrò il ruolo.",
+    "Grazie per essere stato così sincero, Jack. Quella paura di sbagliare — molti dei nostri studenti sono partiti proprio da lì, ed è una cosa su cui lavoriamo direttamente. Non ci si troverà da solo.",
+    "Fa piacere sentirlo.",
+    "E se la promozione andasse in porto — che cosa significherebbe per lei e per la sua famiglia?",
+    "Molto. Più responsabilità, uno stipendio migliore. E viaggerei con sicurezza invece che con stress.",
+    "È un quadro molto chiaro. Ecco che cosa faremo adesso: un breve test per vedere il suo livello oggi, poi guardiamo come funziona il corso, e infine troviamo le opzioni giuste — con i prezzi — per il suo obiettivo. Le sembra una buona idea?",
+    "Sì, mi sembra ottimo.",
+    "Perfetto. Grazie per avermi raccontato la sua storia, Jack. Sono sicura che possiamo prepararla per quella promozione.",
+    "Grazie a lei, Ana."
+  ],
+  caps:{
+    0:"!Rompere il ghiaccio", 2:"Accoglienza calorosa",
+    4:"!Il passato · domanda aperta", 6:"Domanda di approfondimento", 8:"Domanda di chiarimento", 10:"Verbale: riformulare",
+    12:"!Il presente · domanda aperta", 14:"Conferma positiva + curiosità",
+    16:"!Il futuro · domanda aperta", 18:"Domanda di approfondimento",
+    20:"!Conversazione generale", 22:"Mostrare interesse vero", 24:"Un momento umano",
+    26:"!Il Hot Button — la domanda chiave", 28:"VERDE: Esplora",
+    30:"Empatia — il Hot Button è stato ascoltato", 32:"VERDE: Amplia",
+    34:"!Inquadrare", 36:"Chiusura positiva"
+  },
+  notes:{
+    11:["In Centro, rompere il ghiaccio significa contatto visivo, un sorriso e un'accoglienza calorosa.",
+        "Quando Jack ha detto di non aver fatto progressi, Ana non è andata oltre. Ha fatto una domanda di approfondimento, poi una di chiarimento.",
+        "Prima di cambiare argomento, Ana ha riformulato — e ha verificato di aver capito. Jack si è sentito ascoltato."],
+    25:["Quando è emerso il tema della flessibilità, Ana ha confermato in positivo e ha creato curiosità — nessun prezzo, nessun dettaglio per ora.",
+        "La conversazione generale è nata naturalmente dal lavoro di Jack e dai suoi giochi. Breve, umana, e di nuovo sull'inglese da sola."]
+  }
+},
+
+/* -------------------------------------------------------------- Português */
+pt:{
+  fs:{ enter:"Ecrã inteiro", exit:"Sair do ecrã inteiro", newtab:"Abrir num novo separador", hint:"Prima F11 para preencher o ecrã" },
+  kicker:"Descoberta e análise de necessidades · Ver",
+  title:"A reunião do Jack",
+  sub:"Uma análise de necessidades completa, contada em banda desenhada — do primeiro olá ao enquadramento",
+  intro:"O Jack veio ao Centro para a sua primeira reunião. A Ana, a Consultora, recebe-o. Siga a conversa quadro a quadro — as legendas vermelhas indicam a fase e a técnica no momento em que acontecem.",
+  persona:"<b>Jack — Gestor de TI, 34 anos.</b> Três anos de inglês na escola, alguns cursos no trabalho, nunca nenhum progresso. O resto vai descobrir da mesma forma que a Ana: perguntando.",
+  start:"Começar a reunião",
+  topTitle:"A reunião do Jack",
+  nameAna:"ANA", nameJack:"JACK", spAna:"ANA", spJack:"JACK",
+  modeAuto:"Auto ▸", modeTap:"Toque", next:"Seguinte", cont:"Continuar",
+  speed:["Lento","Normal","Rápido"],
+  hintAuto:"A história avança sozinha. Mude para Toque para controlar o ritmo.",
+  hintTap:"Prima Seguinte (ou a barra de espaços) para cada quadro.",
+  noticeTitle:"REPARE COMO…",
+  endKicker:"Fim da reunião",
+  endTitle:"Isto é uma análise de necessidades!",
+  endSub:"Sete fases, uma conversa natural",
+  endBullets:[
+    "Volte atrás e conte quem falou mais. O Jack — de longe. É a regra 80/20.",
+    "O Hot Button surgiu de uma só pergunta: “Porquê agora?” — e era emocional. A promoção é a razão racional; o medo de errar é a verdadeira.",
+    "A Ana nunca falou de preços nem de detalhes do curso. Confirmou de forma positiva, criou curiosidade e enquadrou os passos seguintes.",
+    "Agora é a sua vez: volte ao curso para duas perguntas curtas — depois vai conduzir a sua própria reunião, com a Jill."
+  ],
+  replay:"Ler outra vez",
+  phases:["Gelo","Passado","Presente","Futuro","Geral","Hot Btn","Enquadrar"],
+  lines:[
+    "Olá Jack — bem-vindo à Wall Street English. Eu sou a Ana. Encontrou-nos facilmente?",
+    "Sim, obrigado. O Centro é fácil de encontrar.",
+    "Ainda bem. Faça favor, sente-se. Antes de começarmos — o que já conhece de nós?",
+    "Não muito. Vi o vosso site e uma colega falou-me de vocês uma vez.",
+    "Então vou garantir que sai daqui a saber tudo o que precisa. Mas primeiro gostava de saber de si. Quanto inglês estudou no passado?",
+    "Três anos na escola, há muito tempo. E a minha empresa organizou alguns cursos no trabalho.",
+    "Como correram esses cursos da empresa para si?",
+    "Sinceramente? Nada bem. Nunca senti que estivesse a progredir.",
+    "Compreendo — acontece a muitas pessoas. Foi o método, ou era difícil manter a motivação?",
+    "As duas coisas, acho. As turmas eram grandes e, depois do trabalho, eu estava cansado.",
+    "Portanto o problema não é compreender — é a falar que quer evoluir. Percebi bem?",
+    "Exatamente. Compreendo muito, mas falar… essa é a parte difícil.",
+    "Fale-me do presente. Quanto tempo poderia dedicar ao inglês numa semana normal?",
+    "Uma vez por semana, realisticamente. Viajo muito em trabalho.",
+    "É bom saber — e não é problema nenhum. Temos formas flexíveis de estudar que funcionam bem para quem viaja. Vou mostrar-lhe como, daqui a poucos minutos.",
+    "Isso seria bom.",
+    "E olhando em frente — até que ponto gostaria que o seu inglês fosse bom?",
+    "Quero falar fluentemente. Não perfeito, mas com confiança.",
+    "Falar com confiança. E para que o vai usar, sobretudo?",
+    "Sobretudo trabalho. Reuniões e chamadas com os nossos outros escritórios.",
+    "Disse que viaja muito — o que faz, se me permite a pergunta?",
+    "Sou gestor de TI. E nos tempos livres jogo videojogos online com pessoas de todo o mundo.",
+    "Então já conhece pessoas de todo o lado! Em inglês?",
+    "Tento! Escrevo mais do que falo. O meu filho ri-se da minha pronúncia.",
+    "Que idade tem o seu filho?",
+    "Oito anos. O inglês dele já é melhor que o meu, acho eu.",
+    "Um bom parceiro de treino em casa! Jack — precisa de inglês no trabalho há anos. Porquê agora? O que o trouxe cá esta semana?",
+    "Bem… está a chegar uma promoção. Gestor de TI internacional. Estaria a liderar pessoas em vários países.",
+    "Parece uma grande oportunidade. Como se sente em relação a isso?",
+    "Entusiasmado. E com medo, sinceramente. Tenho medo de falar e de errar à frente das pessoas. Se o meu inglês não for suficientemente bom, não fico com o cargo.",
+    "Obrigada por ser tão sincero, Jack. Esse medo de errar — muitos dos nossos alunos começaram exatamente aí, e é algo em que trabalhamos diretamente. Não vai estar sozinho nisso.",
+    "É bom ouvir isso.",
+    "E se a promoção se concretizar — o que significaria para si e para a sua família?",
+    "Muito. Mais responsabilidade, um salário melhor. E viajaria com confiança em vez de stress.",
+    "É um quadro muito claro. Eis o que vamos fazer a seguir: um teste curto para ver o seu nível hoje, depois vemos como funciona o curso e, por fim, encontramos as opções certas — com preços — para o seu objetivo. Parece-lhe bem?",
+    "Sim, parece-me muito bem.",
+    "Perfeito. Obrigada por me ter contado a sua história, Jack. Estou confiante de que conseguimos prepará-lo para essa promoção.",
+    "Obrigado, Ana."
+  ],
+  caps:{
+    0:"!Quebrar o gelo", 2:"Acolhimento caloroso",
+    4:"!O passado · pergunta aberta", 6:"Pergunta de seguimento", 8:"Pergunta de clarificação", 10:"Verbal: reformular",
+    12:"!O presente · pergunta aberta", 14:"Confirmação positiva + curiosidade",
+    16:"!O futuro · pergunta aberta", 18:"Pergunta de seguimento",
+    20:"!Conversa geral", 22:"Mostrar interesse verdadeiro", 24:"Um momento humano",
+    26:"!O Hot Button — a pergunta-chave", 28:"VERDE: Explorar",
+    30:"Empatia — o Hot Button foi ouvido", 32:"VERDE: Ampliar",
+    34:"!Enquadrar", 36:"Fecho positivo"
+  },
+  notes:{
+    11:["No Centro, quebrar o gelo é contacto visual, um sorriso e um acolhimento caloroso.",
+        "Quando o Jack disse que não tinha progredido, a Ana não avançou. Fez uma pergunta de seguimento e depois uma de clarificação.",
+        "Antes de mudar de assunto, a Ana reformulou — e confirmou que tinha percebido. O Jack sentiu-se ouvido."],
+    25:["Quando surgiu a flexibilidade, a Ana confirmou de forma positiva e criou curiosidade — sem preços, sem detalhes ainda.",
+        "A conversa geral nasceu naturalmente do trabalho do Jack e dos seus jogos. Breve, humana, e de volta ao inglês por si só."]
+  }
+},
+/* ---------------------------------------------------------------- Español */
+es:{
+  fs:{ enter:"Pantalla completa", exit:"Salir de pantalla completa", newtab:"Abrir en una pestaña nueva", hint:"Pulsa F11 para ocupar toda la pantalla" },
+  kicker:"Descubrimiento y análisis de necesidades · Mira",
+  title:"La cita de Jack",
+  sub:"Un análisis de necesidades completo, contado como un cómic — desde el primer saludo hasta el encuadre",
+  intro:"Jack ha venido al Centro para su primera cita. Ana, la Consultora, le da la bienvenida. Sigue la conversación viñeta a viñeta — los rótulos rojos nombran la fase y la técnica en el momento en que ocurren.",
+  persona:"<b>Jack — Responsable de TI, 34 años.</b> Tres años de inglés en el colegio, algún curso en el trabajo, nunca ningún progreso. El resto lo descubrirás igual que lo descubre Ana: preguntando.",
+  start:"Empezar la cita",
+  topTitle:"La cita de Jack",
+  nameAna:"ANA", nameJack:"JACK", spAna:"ANA", spJack:"JACK",
+  modeAuto:"Auto ▸", modeTap:"Toque", next:"Siguiente", cont:"Continuar",
+  speed:["Lento","Normal","Rápido"],
+  hintAuto:"La historia avanza sola. Cambia a Toque para controlar el ritmo.",
+  hintTap:"Pulsa Siguiente (o la barra espaciadora) para cada viñeta.",
+  noticeTitle:"FÍJATE CÓMO…",
+  endKicker:"Fin de la cita",
+  endTitle:"¡Esto es un análisis de necesidades!",
+  endSub:"Siete fases, una conversación natural",
+  endBullets:[
+    "Vuelve atrás y cuenta quién habló más. Jack — con diferencia. Esa es la regla 80/20.",
+    "El Hot Button salió de una sola pregunta: «¿Por qué ahora?» — y era emocional. El ascenso es la razón racional; el miedo a equivocarse es la de verdad.",
+    "Ana no mencionó precios ni detalles del curso en ningún momento. Confirmó en positivo, creó curiosidad y encuadró los siguientes pasos.",
+    "Ahora te toca a ti: vuelve al curso para dos preguntas breves — después llevarás tu propia cita, con Jill."
+  ],
+  replay:"Leer otra vez",
+  phases:["Hielo","Pasado","Presente","Futuro","General","Hot Btn","Encuadre"],
+  lines:[
+    "Hola Jack — bienvenido a Wall Street English. Soy Ana. ¿Nos has encontrado fácilmente?",
+    "Sí, gracias. El Centro es fácil de encontrar.",
+    "Me alegro. Siéntate, por favor. Antes de empezar — ¿qué sabes ya de nosotros?",
+    "No mucho. Vi vuestra web y una compañera me habló de vosotros una vez.",
+    "Entonces me aseguraré de que salgas sabiendo todo lo que necesitas. Pero primero me encantaría saber de ti. ¿Cuánto inglés has estudiado en el pasado?",
+    "Tres años en el colegio, hace mucho tiempo. Y mi empresa organizó algunos cursos en el trabajo.",
+    "¿Qué tal te fueron esos cursos de la empresa?",
+    "¿Sinceramente? No muy bien. Nunca sentí que estuviera avanzando.",
+    "Te entiendo — le pasa a mucha gente. ¿Fue el método, o era difícil mantener la motivación?",
+    "Las dos cosas, creo. Las clases eran grandes y, después del trabajo, estaba cansado.",
+    "Así que el problema no es entender — es hablar donde quieres mejorar. ¿Te he entendido bien?",
+    "Exacto. Entiendo mucho, pero hablar… esa es la parte difícil.",
+    "Cuéntame del presente. ¿Cuánto tiempo podrías dedicarle al inglés en una semana normal?",
+    "Una vez por semana, siendo realista. Viajo mucho por trabajo.",
+    "Es bueno saberlo — y no es ningún problema. Tenemos formas flexibles de estudiar que funcionan muy bien para quien viaja. Te enseñaré cómo, dentro de unos minutos.",
+    "Eso estaría bien.",
+    "Y mirando hacia delante — ¿cómo de bueno te gustaría que fuera tu inglés?",
+    "Quiero hablar con fluidez. No perfecto, pero con confianza.",
+    "Hablar con confianza. ¿Y para qué lo vas a usar, sobre todo?",
+    "Sobre todo para el trabajo. Reuniones y llamadas con nuestras otras oficinas.",
+    "Has dicho que viajas mucho — ¿a qué te dedicas, si puedo preguntar?",
+    "Soy responsable de TI. Y en mi tiempo libre juego a videojuegos online con gente de todo el mundo.",
+    "¡Así que ya conoces a gente de todas partes! ¿En inglés?",
+    "¡Lo intento! Escribo más de lo que hablo. Mi hijo se ríe de mi pronunciación.",
+    "¿Cuántos años tiene tu hijo?",
+    "Ocho. Su inglés ya es mejor que el mío, creo.",
+    "¡Un buen compañero de entrenamiento en casa! Jack — llevas años necesitando inglés en el trabajo. ¿Por qué ahora? ¿Qué te ha hecho venir esta semana?",
+    "Bueno… va a haber un ascenso. Responsable de TI internacional. Estaría dirigiendo a personas en distintos países.",
+    "Suena a una gran oportunidad. ¿Cómo te sientes con ello?",
+    "Ilusionado. Y con miedo, sinceramente. Me da miedo hablar y equivocarme delante de la gente. Si mi inglés no es lo bastante bueno, no conseguiré el puesto.",
+    "Gracias por ser tan sincero, Jack. Ese miedo a equivocarse — muchos de nuestros estudiantes empezaron justo ahí, y es algo en lo que trabajamos directamente. No vas a estar solo con eso.",
+    "Me alegra oír eso.",
+    "Y si el ascenso sale adelante — ¿qué significaría para ti y para tu familia?",
+    "Mucho. Más responsabilidad, un sueldo mejor. Y viajaría con confianza en lugar de con estrés.",
+    "Es una imagen muy clara. Esto es lo que haremos ahora: una prueba corta para ver tu nivel de hoy, después veremos cómo funciona el curso y, por último, buscaremos las opciones adecuadas — con precios — para tu objetivo. ¿Te parece bien?",
+    "Sí, me parece muy bien.",
+    "Perfecto. Gracias por contarme tu historia, Jack. Estoy segura de que podemos prepararte para ese ascenso.",
+    "Gracias a ti, Ana."
+  ],
+  caps:{
+    0:"!Romper el hielo", 2:"Bienvenida cálida",
+    4:"!El pasado · pregunta abierta", 6:"Pregunta de seguimiento", 8:"Pregunta de aclaración", 10:"Verbal: resumir",
+    12:"!El presente · pregunta abierta", 14:"Confirmación positiva + curiosidad",
+    16:"!El futuro · pregunta abierta", 18:"Pregunta de seguimiento",
+    20:"!Conversación general", 22:"Mostrar interés de verdad", 24:"Un momento humano",
+    26:"!El Hot Button — la pregunta clave", 28:"VERDE: Explora",
+    30:"Empatía — el Hot Button se ha escuchado", 32:"VERDE: Amplía",
+    34:"!Encuadre", 36:"Cierre positivo"
+  },
+  notes:{
+    11:["En el Centro, romper el hielo es contacto visual, una sonrisa y una bienvenida cálida.",
+        "Cuando Jack dijo que no había progresado, Ana no siguió adelante. Hizo una pregunta de seguimiento y luego una de aclaración.",
+        "Antes de cambiar de tema, Ana resumió — y comprobó que había entendido. Jack se sintió escuchado."],
+    25:["Cuando salió la flexibilidad, Ana confirmó en positivo y creó curiosidad — sin precios y sin detalles todavía.",
+        "La conversación general surgió de forma natural del trabajo de Jack y de sus juegos. Breve, humana, y de vuelta al inglés por sí sola."]
+  }
+},
+
+/* --------------------------------------------------------------- Français */
+fr:{
+  fs:{ enter:"Plein écran", exit:"Quitter le plein écran", newtab:"Ouvrir dans un nouvel onglet", hint:"Appuyez sur F11 pour remplir l'écran" },
+  kicker:"Découverte et analyse des besoins · Regarder",
+  title:"Le rendez-vous de Jack",
+  sub:"Une analyse des besoins complète, racontée en bande dessinée — du premier bonjour au cadrage",
+  intro:"Jack est venu au Centre pour son premier rendez-vous. Ana, la Conseillère, l'accueille. Suivez la conversation case par case — les légendes rouges nomment la phase et la technique au moment où elles se produisent.",
+  persona:"<b>Jack — Responsable informatique, 34 ans.</b> Trois ans d'anglais au collège, quelques cours au travail, jamais de progrès. Vous découvrirez le reste comme Ana le découvre : en posant des questions.",
+  start:"Commencer le rendez-vous",
+  topTitle:"Le rendez-vous de Jack",
+  nameAna:"ANA", nameJack:"JACK", spAna:"ANA", spJack:"JACK",
+  modeAuto:"Auto ▸", modeTap:"Toucher", next:"Suivant", cont:"Continuer",
+  speed:["Lent","Normal","Rapide"],
+  hintAuto:"L'histoire défile toute seule. Passez en mode Toucher pour régler le rythme.",
+  hintTap:"Appuyez sur Suivant (ou la barre d'espace) pour chaque case.",
+  noticeTitle:"REMARQUEZ COMMENT…",
+  endKicker:"Fin du rendez-vous",
+  endTitle:"Voilà une analyse des besoins !",
+  endSub:"Sept phases, une conversation naturelle",
+  endBullets:[
+    "Revenez en arrière et comptez qui a le plus parlé. Jack — et de loin. C'est la règle des 80/20.",
+    "Le Hot Button est venu d'une seule question : « Pourquoi maintenant ? » — et il était émotionnel. La promotion est la raison rationnelle ; la peur de faire des fautes est la vraie.",
+    "Ana n'a jamais parlé de prix ni de détails du cours. Elle a confirmé positivement, créé de la curiosité et cadré les étapes suivantes.",
+    "À votre tour maintenant : revenez au cours pour deux questions courtes — ensuite vous mènerez votre propre rendez-vous, avec Jill."
+  ],
+  replay:"Relire",
+  phases:["Glace","Passé","Présent","Futur","Général","Hot Btn","Cadrage"],
+  lines:[
+    "Bonjour Jack — bienvenue chez Wall Street English. Je suis Ana. Vous nous avez trouvés facilement ?",
+    "Oui, merci. Le Centre est facile à trouver.",
+    "Tant mieux. Asseyez-vous, je vous en prie. Avant de commencer — que savez-vous déjà de nous ?",
+    "Pas grand-chose. J'ai vu votre site, et une collègue m'en a parlé une fois.",
+    "Alors je ferai en sorte que vous repartiez en sachant tout ce qu'il vous faut. Mais d'abord, j'aimerais vous connaître. Combien d'anglais avez-vous étudié par le passé ?",
+    "Trois ans au collège, il y a longtemps. Et mon entreprise a organisé quelques cours au travail.",
+    "Comment se sont passés ces cours en entreprise pour vous ?",
+    "Honnêtement ? Pas terrible. Je n'ai jamais eu l'impression de progresser.",
+    "Je comprends — cela arrive à beaucoup de gens. Était-ce la méthode, ou était-ce difficile de rester motivé ?",
+    "Les deux, je pense. Les groupes étaient grands, et après le travail j'étais fatigué.",
+    "Donc comprendre n'est pas le problème — c'est parler que vous voulez développer. Ai-je bien compris ?",
+    "Exactement. Je comprends beaucoup, mais parler… c'est ça le plus dur.",
+    "Parlons du présent. Combien de temps pourriez-vous consacrer à l'anglais dans une semaine normale ?",
+    "Une fois par semaine, réalistement. Je voyage beaucoup pour le travail.",
+    "C'est bon à savoir — et ce n'est pas un problème. Nous avons des façons souples d'étudier qui conviennent très bien aux personnes qui voyagent. Je vous montrerai comment, dans quelques minutes.",
+    "Ce serait bien.",
+    "Et en regardant devant vous — quel niveau d'anglais aimeriez-vous atteindre ?",
+    "Je veux parler couramment. Pas parfait, mais avec assurance.",
+    "Parler avec assurance. Et vous en servirez-vous surtout pour quoi ?",
+    "Le travail, surtout. Des réunions, et des appels avec nos autres bureaux.",
+    "Vous avez dit que vous voyagez beaucoup — que faites-vous, si je peux me permettre ?",
+    "Je suis responsable informatique. Et pendant mon temps libre je joue en ligne avec des gens du monde entier.",
+    "Vous rencontrez donc déjà des gens de partout ! En anglais ?",
+    "J'essaie ! J'écris plus que je ne parle. Mon fils se moque de ma prononciation.",
+    "Quel âge a votre fils ?",
+    "Huit ans. Son anglais est déjà meilleur que le mien, je crois.",
+    "Un bon partenaire d'entraînement à la maison ! Jack — vous avez besoin d'anglais au travail depuis des années. Pourquoi maintenant ? Qu'est-ce qui vous a fait venir cette semaine ?",
+    "Eh bien… une promotion se prépare. Responsable informatique international. J'encadrerais des équipes dans plusieurs pays.",
+    "Cela ressemble à une belle opportunité. Comment le vivez-vous ?",
+    "Enthousiaste. Et inquiet, honnêtement. J'ai peur de parler et de faire des fautes devant les autres. Si mon anglais n'est pas assez bon, je n'aurai pas le poste.",
+    "Merci d'être aussi franc, Jack. Cette peur de faire des fautes — beaucoup de nos étudiants sont partis exactement de là, et c'est quelque chose sur quoi nous travaillons directement. Vous ne serez pas seul face à cela.",
+    "Cela fait du bien à entendre.",
+    "Et si la promotion se concrétise — qu'est-ce que cela représenterait pour vous et votre famille ?",
+    "Beaucoup. Plus de responsabilités, un meilleur salaire. Et je voyagerais avec assurance plutôt qu'avec stress.",
+    "C'est une image très claire. Voici ce que nous allons faire : un test rapide pour voir votre niveau aujourd'hui, ensuite nous verrons comment fonctionne le cours, et enfin nous trouverons les bonnes options — avec les tarifs — pour votre objectif. Cela vous convient ?",
+    "Oui, cela me convient très bien.",
+    "Parfait. Merci de m'avoir raconté votre parcours, Jack. Je suis convaincue que nous pouvons vous préparer pour cette promotion.",
+    "Merci à vous, Ana."
+  ],
+  caps:{
+    0:"!Briser la glace", 2:"Accueil chaleureux",
+    4:"!Le passé · question ouverte", 6:"Question de relance", 8:"Question de clarification", 10:"Verbal : reformuler",
+    12:"!Le présent · question ouverte", 14:"Confirmation positive + curiosité",
+    16:"!Le futur · question ouverte", 18:"Question de relance",
+    20:"!Conversation générale", 22:"Montrer un intérêt sincère", 24:"Un moment humain",
+    26:"!Le Hot Button — la question clé", 28:"VERT : Explorer",
+    30:"Empathie — le Hot Button est entendu", 32:"VERT : Élargir",
+    34:"!Cadrage", 36:"Conclusion positive"
+  },
+  notes:{
+    11:["Au Centre, briser la glace, c'est un regard, un sourire et un accueil chaleureux.",
+        "Quand Jack a dit qu'il n'avait pas progressé, Ana n'est pas passée à la suite. Elle a posé une question de relance, puis une question de clarification.",
+        "Avant de changer de sujet, Ana a reformulé — et vérifié qu'elle avait bien compris. Jack s'est senti entendu."],
+    25:["Quand la souplesse est venue sur la table, Ana a confirmé positivement et créé de la curiosité — pas de tarifs, pas de détails pour l'instant.",
+        "La conversation générale est née naturellement du métier de Jack et de ses jeux. Brève, humaine, et retour à l'anglais tout seul."]
+  }
+},
+
+/* ----------------------------------------------------------------- العربية */
+ar:{
+  fs:{ enter:"ملء الشاشة", exit:"إنهاء ملء الشاشة", newtab:"فتح في تبويب جديد", hint:"اضغط F11 لملء الشاشة" },
+  kicker:"الاستكشاف وتحليل الاحتياجات · شاهد",
+  title:"موعد جاك",
+  sub:"تحليل احتياجات كامل، مرويّ على شكل قصة مصوّرة — من أول تحية حتى التأطير",
+  intro:"جاء جاك إلى المركز في موعده الأول. آنا، المستشارة، ترحّب به. تابع الحوار لوحةً بلوحة — العناوين الحمراء تسمّي المرحلة والمهارة في لحظة حدوثها.",
+  persona:"<b>جاك — مدير تقنية معلومات، ٣٤ سنة.</b> ثلاث سنوات من الإنجليزية في المدرسة، وبعض الدورات في العمل، ودون أي تقدّم. ستكتشف البقية بالطريقة نفسها التي تكتشفها بها آنا: بالسؤال.",
+  start:"ابدأ الموعد",
+  topTitle:"موعد جاك",
+  nameAna:"آنا", nameJack:"جاك", spAna:"آنا", spJack:"جاك",
+  modeAuto:"تلقائي ◂", modeTap:"لمس", next:"التالي", cont:"متابعة",
+  speed:["بطيء","عادي","سريع"],
+  hintAuto:"القصة تعمل تلقائيًا. بدّل إلى وضع اللمس للتحكم في الإيقاع.",
+  hintTap:"اضغط على التالي (أو مفتاح المسافة) لكل لوحة.",
+  noticeTitle:"لاحظ كيف…",
+  endKicker:"نهاية الموعد",
+  endTitle:"هذا هو تحليل الاحتياجات!",
+  endSub:"سبع مراحل، وحوار واحد طبيعي",
+  endBullets:[
+    "عُد بذاكرتك واحسب من تحدّث أكثر. جاك — بفارق كبير. تلك هي قاعدة ٨٠/٢٠.",
+    "ظهرت النقطة الحساسة من سؤال واحد: «لماذا الآن؟» — وكانت عاطفية. الترقية هي السبب المنطقي؛ أما الخوف من ارتكاب الأخطاء فهو السبب الحقيقي.",
+    "لم تذكر آنا الأسعار ولا تفاصيل الدورة إطلاقًا. أكّدت بإيجابية، وأثارت الفضول، وأطّرت الخطوات التالية.",
+    "الآن جاء دورك: عُد إلى الدورة للإجابة عن سؤالين قصيرين — ثم ستدير موعدك الخاص، مع جيل."
+  ],
+  replay:"اقرأها مرة أخرى",
+  phases:["كسر الجمود","الماضي","الحاضر","المستقبل","حوار عام","النقطة الحساسة","التأطير"],
+  lines:[
+    "مرحبًا جاك — أهلًا بك في Wall Street English. أنا آنا. هل وجدتنا بسهولة؟",
+    "نعم، شكرًا. المركز سهل الوصول إليه.",
+    "يسعدني ذلك. تفضّل بالجلوس. قبل أن نبدأ — ماذا تعرف عنّا حتى الآن؟",
+    "ليس كثيرًا. رأيت موقعكم، وذكرتكم زميلة لي مرة.",
+    "إذن سأحرص على أن تغادر وأنت تعرف كل ما تحتاجه. لكن أولًا، أودّ أن أسمع عنك. كم درست من الإنجليزية في الماضي؟",
+    "ثلاث سنوات في المدرسة، منذ وقت طويل. وشركتي نظّمت بعض الدورات في العمل.",
+    "كيف كانت تلك الدورات في العمل بالنسبة لك؟",
+    "بصراحة؟ لم تكن جيدة. لم أشعر يومًا بأنني أحرز تقدّمًا.",
+    "أتفهّم ذلك — يحدث هذا لكثيرين. هل كانت المشكلة في الطريقة، أم كان من الصعب الحفاظ على الحافز؟",
+    "الاثنان معًا، على ما أظن. كانت الصفوف كبيرة، وبعد العمل كنت متعبًا.",
+    "إذن الفهم ليس هو المشكلة — بل التحدث هو ما تريد تطويره. هل فهمتك بشكل صحيح؟",
+    "بالضبط. أفهم الكثير، لكن التحدث… هذا هو الجزء الصعب.",
+    "حدّثني عن الحاضر. كم من الوقت يمكنك أن تخصّص للإنجليزية في أسبوع عادي؟",
+    "مرة واحدة أسبوعيًا، بواقعية. أسافر كثيرًا من أجل العمل.",
+    "من الجيد معرفة ذلك — وهذه ليست مشكلة. لدينا طرق مرنة للدراسة تناسب تمامًا من يسافرون كثيرًا. سأريك كيف، بعد قليل.",
+    "سيكون ذلك جيدًا.",
+    "وبالنظر إلى المستقبل — إلى أي مستوى تودّ أن تصل بإنجليزيتك؟",
+    "أريد أن أتحدث بطلاقة. ليس بشكل مثالي، لكن بثقة.",
+    "التحدث بثقة. وفيمَ ستستخدمها بشكل أساسي؟",
+    "في العمل، غالبًا. الاجتماعات، والمكالمات مع مكاتبنا الأخرى.",
+    "قلت إنك تسافر كثيرًا — ما طبيعة عملك، إن سمحت لي بالسؤال؟",
+    "أنا مدير تقنية معلومات. وفي وقت فراغي ألعب ألعاب الفيديو عبر الإنترنت مع أشخاص من كل أنحاء العالم.",
+    "إذن أنت تلتقي بالفعل بأشخاص من كل مكان! بالإنجليزية؟",
+    "أحاول! أكتب أكثر مما أتحدث. ابني يضحك على نطقي.",
+    "كم عمر ابنك؟",
+    "ثماني سنوات. إنجليزيته أفضل من إنجليزيتي بالفعل، على ما أظن.",
+    "شريك تدريب ممتاز في البيت! جاك — أنت بحاجة إلى الإنجليزية في عملك منذ سنوات. لماذا الآن؟ ما الذي دفعك للحضور هذا الأسبوع؟",
+    "حسنًا… هناك ترقية قادمة. مدير تقنية معلومات دولي. سأقود فرقًا في بلدان مختلفة.",
+    "تبدو فرصة كبيرة. كيف تشعر حيالها؟",
+    "متحمّس. وخائف، بصراحة. أخاف أن أتحدث وأخطئ أمام الناس. إن لم تكن إنجليزيتي جيدة بما يكفي، لن أحصل على المنصب.",
+    "شكرًا لصراحتك يا جاك. هذا الخوف من ارتكاب الأخطاء — كثير من طلابنا بدأوا من هذه النقطة بالضبط، وهو أمر نعمل عليه مباشرة. لن تواجهه وحدك.",
+    "من الجيد سماع ذلك.",
+    "وإذا تحققت الترقية — ماذا ستعني لك ولعائلتك؟",
+    "الكثير. مسؤولية أكبر، وراتب أفضل. وسأسافر بثقة بدلًا من التوتر.",
+    "هذه صورة واضحة جدًا. إليك ما سنفعله تاليًا: اختبار قصير لنرى مستواك اليوم، ثم نطّلع على طريقة عمل الدورة، وبعدها نجد الخيارات المناسبة — مع الأسعار — لهدفك. هل يبدو ذلك جيدًا؟",
+    "نعم، يبدو جيدًا جدًا.",
+    "ممتاز. شكرًا لأنك رويت لي قصتك يا جاك. أنا واثقة من أننا نستطيع تجهيزك لتلك الترقية.",
+    "شكرًا لكِ يا آنا."
+  ],
+  caps:{
+    0:"!كسر الجمود", 2:"ترحيب دافئ",
+    4:"!الماضي · سؤال مفتوح", 6:"سؤال متابعة", 8:"سؤال توضيحي", 10:"لفظي: إعادة الصياغة",
+    12:"!الحاضر · سؤال مفتوح", 14:"تأكيد إيجابي + إثارة فضول",
+    16:"!المستقبل · سؤال مفتوح", 18:"سؤال متابعة",
+    20:"!حوار عام", 22:"إظهار اهتمام حقيقي", 24:"لحظة إنسانية",
+    26:"!النقطة الحساسة — السؤال المفتاح", 28:"أخضر: استكشف",
+    30:"تعاطف — سُمعت النقطة الحساسة", 32:"أخضر: وسّع",
+    34:"!التأطير", 36:"خاتمة إيجابية"
+  },
+  notes:{
+    11:["في المركز، كسر الجمود هو تواصل بالعين، وابتسامة، وترحيب دافئ.",
+        "حين قال جاك إنه لم يحرز تقدّمًا، لم تتجاوز آنا الأمر. سألت سؤال متابعة، ثم سؤالًا توضيحيًا.",
+        "قبل تغيير الموضوع، أعادت آنا صياغة ما سمعته — وتأكدت أنها فهمت. فشعر جاك بأنه مسموع."],
+    25:["حين طُرح موضوع المرونة، أكّدت آنا بإيجابية وأثارت الفضول — دون أسعار ودون تفاصيل حتى الآن.",
+        "نشأ الحوار العام بشكل طبيعي من عمل جاك وألعابه. قصير، وإنساني، ثم عاد إلى الإنجليزية من تلقاء نفسه."]
+  }
+}
+
 };
 
-/* who: 0=Ana (left, navy), 1=Jack (right, red). phase 0-6.
-   cap: caption chip ("!"=phase chip, else technique chip).
-   audio: clip URL to enable per-panel sound (auto-detected). Text works fully alone. */
-const LINES = [
- {who:0, phase:0, cap:"!Breaking the Ice", t:"Hello Jack \u2014 welcome to Wall Street English. I'm Ana. Did you find us easily?", audio:null},
- {who:1, phase:0, t:"Yes, thanks. The Center is easy to find."},
- {who:0, phase:0, cap:"Warm welcome", t:"I'm glad. Please, sit down. Before we start \u2014 how much do you already know about us?"},
- {who:1, phase:0, t:"Not very much. I saw your website, and a colleague mentioned you once."},
- {who:0, phase:1, cap:"!The Past \u00b7 open question", t:"Then I'll make sure you leave knowing everything you need. But first, I'd love to hear about you. How much English have you studied in the past?"},
- {who:1, phase:1, t:"Three years at school, a long time ago. And my company organised some courses at work."},
- {who:0, phase:1, cap:"Follow-up question", t:"How were those work courses for you?"},
- {who:1, phase:1, t:"Honestly? Not great. I never felt I was making progress."},
- {who:0, phase:1, cap:"Clarifying question", t:"I understand \u2014 that happens to many people. Was it the method, or was it hard to stay motivated?"},
- {who:1, phase:1, t:"Both, I think. The classes were big, and after work I was tired."},
- {who:0, phase:1, cap:"Verbal: summarising", t:"So understanding isn't the problem \u2014 speaking is where you want to grow. Have I understood you right?"},
- {who:1, phase:1, t:"Exactly. I understand a lot, but speaking\u2026 that's the hard part.", pause:1},
- {who:0, phase:2, cap:"!The Present \u00b7 open question", t:"Tell me about now. How much time could you give to English in a normal week?"},
- {who:1, phase:2, t:"Once a week, realistically. I travel a lot for work."},
- {who:0, phase:2, cap:"Positive confirmation + curiosity", t:"That's good to know \u2014 and it's no problem. We have flexible ways to study that work well for people who travel. I'll show you how, in a few minutes."},
- {who:1, phase:2, t:"That would be good."},
- {who:0, phase:3, cap:"!The Future \u00b7 open question", t:"And looking ahead \u2014 how good would you like your English to be?"},
- {who:1, phase:3, t:"I want to speak fluently. Not perfect, but confident."},
- {who:0, phase:3, cap:"Follow-up question", t:"Confident speaking. And what will you use it for, mainly?"},
- {who:1, phase:3, t:"Work, mostly. Meetings, and calls with our other offices."},
- {who:0, phase:4, cap:"!General Conversation", t:"You said you travel a lot \u2014 what do you do, if I may ask?"},
- {who:1, phase:4, t:"I'm an IT manager. And in my free time I play video games online with people from all over the world."},
- {who:0, phase:4, cap:"Showing real interest", t:"So you already meet people from everywhere! In English?"},
- {who:1, phase:4, t:"I try! I type more than I speak. My son laughs at my pronunciation."},
- {who:0, phase:4, cap:"A human moment", t:"How old is your son?"},
- {who:1, phase:4, t:"Eight. His English is already better than mine, I think.", pause:2},
- {who:0, phase:5, cap:"!The Hot Button \u2014 the key question", t:"A good training partner at home! Jack \u2014 you've needed English at work for years. Why now? What made you come in this week?"},
- {who:1, phase:5, t:"Well\u2026 there's a promotion coming. International IT manager. I'd be leading people in different countries."},
- {who:0, phase:5, cap:"GREEN: Explore", t:"That sounds like a big opportunity. How do you feel about it?"},
- {who:1, phase:5, t:"Excited. And afraid, honestly. I'm afraid to speak and make mistakes in front of people. If my English isn't good enough, I won't get the role."},
- {who:0, phase:5, cap:"Empathy \u2014 the Hot Button is heard", t:"Thank you for being so honest, Jack. That fear of making mistakes \u2014 many of our students started right there, and it's something we work on directly. You won't be alone with it."},
- {who:1, phase:5, t:"That's good to hear."},
- {who:0, phase:5, cap:"GREEN: Expand", t:"And if the promotion works out \u2014 what would it mean for you and your family?"},
- {who:1, phase:5, t:"A lot. More responsibility, a better salary. And I'd travel with confidence instead of stress."},
- {who:0, phase:6, cap:"!Framing", t:"That's a very clear picture. Here's what we'll do next: a short test to see your level today, then we'll look at how the course works, and then we'll find the right options \u2014 with prices \u2014 for your goal. Does that sound good?"},
- {who:1, phase:6, t:"Yes, that sounds very good."},
- {who:0, phase:6, cap:"Positive close", t:"Perfect. Thank you for telling me your story, Jack. I'm confident we can get you ready for that promotion."},
- {who:1, phase:6, t:"Thank you, Ana."}
-];
+const LANG_NAMES={en:"English",it:"Italiano",pt:"Português",es:"Español",fr:"Français",ar:"العربية"};
+const RTL=["ar"];
 
-/* interlude notice cards shown AFTER this 0-based line index */
-const NOTICES = {
- 11:[ "In the Center, Breaking the Ice is eye contact, a smile and a warm welcome.",
-      "When Jack said he made no progress, Ana didn't move on. She asked a follow-up, then a clarifying question.",
-      "Before changing topic, Ana summarised \u2014 and checked she'd understood. Jack felt heard." ],
- 25:[ "When flexibility came up, Ana confirmed positively and created curiosity \u2014 no prices, no details yet.",
-      "General Conversation grew naturally out of Jack's job and his games. Brief, human, and back to English by itself." ]
-};
+function normalizeLang(l){
+  if(!l) return "en";
+  l=String(l).toLowerCase();
+  if(I18N[l]) return l;
+  const base=l.split("-")[0];
+  return I18N[base]?base:"en";
+}
+/* ?lang= wins, then the browser, then English. Switching reloads with a new
+   ?lang= rather than re-rendering in place — the player is stateful and a
+   half-swapped language is a worse bug than a reload. */
+const LANG=normalizeLang(new URLSearchParams(location.search).get("lang")||navigator.language);
+document.documentElement.lang=LANG;
+document.documentElement.dir=RTL.indexOf(LANG)>=0?"rtl":"ltr";
+
+const STR=I18N[LANG];
+/* rebuild the panel list from shared structure + this language's text */
+const LINES=BEATS.map((b,i)=>{
+  const o={who:b.who,phase:b.phase,t:STR.lines[i],audio:null};
+  if(b.cap&&STR.caps[i]) o.cap=STR.caps[i];
+  return o;
+});
+const NOTICES=STR.notes;
 
 /* ============================ PLAYER ============================ */
 const $=id=>document.getElementById(id);
@@ -335,8 +882,13 @@ function advance(){
   if(waiting||done)return;
   idx++;
   if(idx>=LINES.length){finish();return;}
-  playLine(idx,()=>{
-    if(NOTICES[idx])showNotice(NOTICES[idx],()=>{});
+  /* Capture the beat index. The callback fires after the "thinking" delay,
+     so a learner who taps Next inside that window would otherwise have the
+     PREVIOUS beat's callback read the new idx, firing that beat's notice card
+     early and then again when its own callback lands. */
+  const i=idx;
+  playLine(i,()=>{
+    if(NOTICES[i])showNotice(NOTICES[i],()=>{});
   });
 }
 function finish(){done=true;setTimeout(()=>$("end").classList.remove("hidden"),700);}
@@ -348,6 +900,97 @@ document.addEventListener("keydown",e=>{
   if(!$("intro").classList.contains("hidden"))return;
   if(e.key===" "||e.key==="Enter"||e.key==="ArrowRight"){e.preventDefault();advance();}
 });
+
+/* ===== fullscreen =====
+   The stage sizes itself to whatever box it is embedded in, and we do not
+   control that box. An LMS iframe taller than the learner's visible area puts
+   the lower half of the activity below the fold, where nothing inside the
+   iframe can detect it. This is the escape hatch.
+
+   It degrades fullscreen -> new tab -> hint, because an LMS may rewrite or
+   strip allowfullscreen on the iframe tag. Ported from SANDBOXTEMPLATE; the
+   toast and i18n lookups it relied on do not exist here, so the labels come
+   from the activity's own copy object and the hint borrows the button label. */
+const FS = STR.fs;
+const FS_W = 920, FS_H = 620;
+const fsBtn = document.getElementById("fsBtn");
+const fsLabelEl = fsBtn && fsBtn.querySelector(".fs-label");
+const fsEl = () => document.fullscreenElement || document.webkitFullscreenElement || null;
+// false when the embedding iframe carries no allowfullscreen
+const fsSupported = !!(document.fullscreenEnabled || document.webkitFullscreenEnabled);
+// about:srcdoc, blob: and data: cannot be reopened as a top-level document
+const fsCanPopOut = /^https?:$/.test(location.protocol);
+let fsMode = fsSupported ? "fullscreen" : (fsCanPopOut ? "popout" : "hint");
+let fsHintTimer;
+
+function syncFsLabel(){
+  if(!fsBtn) return;
+  const on = !!fsEl();
+  const t = fsMode === "popout" ? FS.newtab : on ? FS.exit : FS.enter;
+  fsLabelEl.textContent = t; fsBtn.title = t;
+  fsBtn.classList.toggle("is-on", on);
+  // aria-pressed describes a toggle; in popout mode this is a one-way action,
+  // so drop the attribute rather than lie with "false"
+  if(fsMode === "popout") fsBtn.removeAttribute("aria-pressed");
+  else fsBtn.setAttribute("aria-pressed", on ? "true" : "false");
+}
+// there is no toast component in these activities, so the hint borrows the
+// button's own label for a few seconds
+function fsHint(){
+  if(!fsBtn) return;
+  fsLabelEl.textContent = FS.hint; fsBtn.title = FS.hint;
+  clearTimeout(fsHintTimer); fsHintTimer = setTimeout(syncFsLabel, 4000);
+}
+function fsDemote(){ fsMode = fsCanPopOut ? "popout" : "hint"; syncFsLabel(); fsHint(); }
+
+/* Scale the stage rather than stretch it. This is a fixed 920xH design, so
+   plain fullscreen on a large monitor would just centre a postage stamp in a
+   huge field and read as broken. Text scales as vectors and nothing reflows. */
+function fitStage(){
+  const st = document.querySelector(".stage"); if(!st) return;
+  const s = fsEl() ? Math.min(innerWidth / FS_W, innerHeight / FS_H) : 1;
+  st.style.setProperty("--fs-scale", Math.max(1, Math.min(2, s)).toFixed(3));
+}
+
+function toggleFullscreen(){
+  if(fsMode === "hint"){ fsHint(); return; }
+  if(fsMode === "popout"){
+    // returns null when the iframe is sandboxed without allow-popups
+    if(!window.open(location.href, "_blank", "noopener")){ fsMode = "hint"; fsDemote(); }
+    return;
+  }
+  if(fsEl()){ (document.exitFullscreen || document.webkitExitFullscreen).call(document); return; }
+  /* documentElement, NOT .stage: element fullscreen forces width/height:100%
+     over the fixed design and paints an opaque black ::backdrop, which would
+     replace the activity's own ground. */
+  const el = document.documentElement;
+  const req = el.requestFullscreen || el.webkitRequestFullscreen;
+  if(!req){ fsDemote(); return; }
+  // webkitRequestFullscreen returns undefined rather than a Promise, and a
+  // request can still be refused after fullscreenEnabled read true
+  Promise.resolve(req.call(el)).catch(fsDemote);
+}
+
+if(fsBtn) fsBtn.addEventListener("click", toggleFullscreen);
+/* The change event is the source of truth, never the click handler: Esc, F11,
+   a refused request and the window manager all change state without it. */
+["fullscreenchange","webkitfullscreenchange"].forEach(ev =>
+  document.addEventListener(ev, () => { syncFsLabel(); fitStage(); }));
+addEventListener("resize", fitStage);
+syncFsLabel(); fitStage();
+
+/* ----- language switcher ----- */
+(function(){
+  const sel=document.getElementById("langsel"); if(!sel) return;
+  Object.keys(I18N).forEach(c=>{
+    const o=document.createElement("option");
+    o.value=c; o.textContent=LANG_NAMES[c]||c; if(c===LANG) o.selected=true;
+    sel.appendChild(o);
+  });
+  sel.addEventListener("change",()=>{
+    const u=new URL(location.href); u.searchParams.set("lang",sel.value); location.href=u.toString();
+  });
+})();
 </script>
 </body>
 </html>
