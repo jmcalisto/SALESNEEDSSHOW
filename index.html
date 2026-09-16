@@ -12,6 +12,10 @@
     --sky:#dcebf9; --paper:#f6f9fd; --ink:#132441; --muted:#5a6b85;
     --ana:#002856; --jack:#ffffff; --jackink:#132441;
     --panel-border:#101828;
+    /* fullscreen affordance -- shared verbatim with the Do section. Player
+       chrome, so it is the one component that does NOT take on this
+       section's comic vocabulary. See STYLE_GUIDE.md. */
+    --fs-green:#127A47; --fs-green-deep:#0D5F37;
   }
   *{box-sizing:border-box;margin:0;padding:0}
   html,body{height:100%}
@@ -133,16 +137,22 @@
      shadow, press-to-squash. A direct child of .stage at z-index 25, NOT in
      the topbar: the intro and end .screen overlays sit at z-index 20 and would
      bury a topbar button on exactly the screens a stuck learner needs it. */
-  .fs-btn{position:absolute;top:10px;inset-inline-end:14px;z-index:25;
-    display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 12px;
-    background:var(--sky);color:var(--navy);
-    border:2px solid var(--panel-border);border-radius:999px;
-    box-shadow:2px 2px 0 rgba(0,0,0,.28);
-    font-family:inherit;font-size:11.5px;font-weight:700;white-space:nowrap;cursor:pointer}
-  .fs-btn:active{transform:translate(1px,1px);box-shadow:1px 1px 0 rgba(0,0,0,.28)}
+  /* Fullscreen button -- centred at the top of the stage and deliberately loud.
+     z-index sits above .screen (20) so it is reachable from the intro screen,
+     before the learner has started. Solid green rather than the comic
+     vocabulary, so it reads as player chrome rather than part of the story. */
+  .fs-btn{position:absolute;top:10px;left:50%;transform:translateX(-50%);z-index:25;
+    display:inline-flex;align-items:center;gap:8px;height:32px;padding:0 16px;
+    background:var(--fs-green);color:#fff;
+    border:0;border-radius:999px;
+    box-shadow:0 2px 10px rgba(0,0,0,.45);
+    font-family:inherit;font-size:12.5px;font-weight:800;letter-spacing:.02em;
+    white-space:nowrap;cursor:pointer;transition:background .15s,box-shadow .15s}
+  .fs-btn:hover{background:var(--fs-green-deep)}
+  .fs-btn:active{transform:translateX(-50%) translateY(1px)}
   .fs-btn:focus-visible{outline:3px solid var(--red);outline-offset:2px}
-  .fs-btn.is-on{background:rgba(255,255,255,.14);color:#fff;
-    border-color:rgba(255,255,255,.4);box-shadow:none}
+  /* once fullscreen, it has done its job -- recede into the navy topbar */
+  .fs-btn.is-on{background:rgba(255,255,255,.14);color:#fff;box-shadow:none}
 
   /* language switcher — on the intro screen, where there is room and where a
      learner chooses once. ?lang= stays the primary mechanism for LMS embeds. */
@@ -263,7 +273,7 @@ const I18N = {
 
 /* ---------------------------------------------------------------- English */
 en:{
-  fs:{ enter:"Fullscreen", exit:"Exit fullscreen", newtab:"Open in a new tab", hint:"Press F11 to fill your screen" },
+  fs:{ enter:"Fullscreen", exit:"Exit fullscreen", hint:"Press F11 to fill your screen" },
   kicker:"Discovery & Needs Analysis · Show",
   title:"Jack's appointment",
   sub:"A complete Needs Analysis, told as a comic — from the first hello to the frame",
@@ -349,7 +359,7 @@ en:{
 
 /* ---------------------------------------------------------------- Italiano */
 it:{
-  fs:{ enter:"Schermo intero", exit:"Esci da schermo intero", newtab:"Apri in una nuova scheda", hint:"Premi F11 per riempire lo schermo" },
+  fs:{ enter:"Schermo intero", exit:"Esci da schermo intero", hint:"Premi F11 per riempire lo schermo" },
   kicker:"Scoperta e analisi dei bisogni · Guarda",
   title:"L'appuntamento di Jack",
   sub:"Un'analisi dei bisogni completa, raccontata a fumetti — dal primo saluto all'inquadramento",
@@ -435,7 +445,7 @@ it:{
 
 /* -------------------------------------------------------------- Português */
 pt:{
-  fs:{ enter:"Ecrã inteiro", exit:"Sair do ecrã inteiro", newtab:"Abrir num novo separador", hint:"Prima F11 para preencher o ecrã" },
+  fs:{ enter:"Ecrã inteiro", exit:"Sair do ecrã inteiro", hint:"Prima F11 para preencher o ecrã" },
   kicker:"Descoberta e análise de necessidades · Ver",
   title:"A reunião do Jack",
   sub:"Uma análise de necessidades completa, contada em banda desenhada — do primeiro olá ao enquadramento",
@@ -520,7 +530,7 @@ pt:{
 },
 /* ---------------------------------------------------------------- Español */
 es:{
-  fs:{ enter:"Pantalla completa", exit:"Salir de pantalla completa", newtab:"Abrir en una pestaña nueva", hint:"Pulsa F11 para ocupar toda la pantalla" },
+  fs:{ enter:"Pantalla completa", exit:"Salir de pantalla completa", hint:"Pulsa F11 para ocupar toda la pantalla" },
   kicker:"Descubrimiento y análisis de necesidades · Mira",
   title:"La cita de Jack",
   sub:"Un análisis de necesidades completo, contado como un cómic — desde el primer saludo hasta el encuadre",
@@ -606,7 +616,7 @@ es:{
 
 /* --------------------------------------------------------------- Français */
 fr:{
-  fs:{ enter:"Plein écran", exit:"Quitter le plein écran", newtab:"Ouvrir dans un nouvel onglet", hint:"Appuyez sur F11 pour remplir l'écran" },
+  fs:{ enter:"Plein écran", exit:"Quitter le plein écran", hint:"Appuyez sur F11 pour remplir l'écran" },
   kicker:"Découverte et analyse des besoins · Regarder",
   title:"Le rendez-vous de Jack",
   sub:"Une analyse des besoins complète, racontée en bande dessinée — du premier bonjour au cadrage",
@@ -692,7 +702,7 @@ fr:{
 
 /* ----------------------------------------------------------------- العربية */
 ar:{
-  fs:{ enter:"ملء الشاشة", exit:"إنهاء ملء الشاشة", newtab:"فتح في تبويب جديد", hint:"اضغط F11 لملء الشاشة" },
+  fs:{ enter:"ملء الشاشة", exit:"إنهاء ملء الشاشة", hint:"اضغط F11 لملء الشاشة" },
   kicker:"الاستكشاف وتحليل الاحتياجات · شاهد",
   title:"موعد جاك",
   sub:"تحليل احتياجات كامل، مرويّ على شكل قصة مصوّرة — من أول تحية حتى التأطير",
@@ -907,10 +917,12 @@ document.addEventListener("keydown",e=>{
    the lower half of the activity below the fold, where nothing inside the
    iframe can detect it. This is the escape hatch.
 
-   It degrades fullscreen -> new tab -> hint, because an LMS may rewrite or
-   strip allowfullscreen on the iframe tag. Ported from SANDBOXTEMPLATE; the
-   toast and i18n lookups it relied on do not exist here, so the labels come
-   from the activity's own copy object and the hint borrows the button label. */
+   Our LMS embed grants allowfullscreen, so this is a real Fullscreen API
+   call, never a new tab: popping out to a tab loses the learner's place in
+   the course and orphans them outside the player. The only fallback left is
+   an inline F11 hint. Ported from SANDBOXTEMPLATE; the toast and i18n
+   lookups it relied on do not exist here, so the labels come from the
+   activity's own copy object. */
 const FS = STR.fs;
 const FS_W = 920, FS_H = 620;
 const fsBtn = document.getElementById("fsBtn");
@@ -918,21 +930,16 @@ const fsLabelEl = fsBtn && fsBtn.querySelector(".fs-label");
 const fsEl = () => document.fullscreenElement || document.webkitFullscreenElement || null;
 // false when the embedding iframe carries no allowfullscreen
 const fsSupported = !!(document.fullscreenEnabled || document.webkitFullscreenEnabled);
-// about:srcdoc, blob: and data: cannot be reopened as a top-level document
-const fsCanPopOut = /^https?:$/.test(location.protocol);
-let fsMode = fsSupported ? "fullscreen" : (fsCanPopOut ? "popout" : "hint");
+let fsMode = fsSupported ? "fullscreen" : "hint";
 let fsHintTimer;
 
 function syncFsLabel(){
   if(!fsBtn) return;
   const on = !!fsEl();
-  const t = fsMode === "popout" ? FS.newtab : on ? FS.exit : FS.enter;
+  const t = on ? FS.exit : FS.enter;
   fsLabelEl.textContent = t; fsBtn.title = t;
   fsBtn.classList.toggle("is-on", on);
-  // aria-pressed describes a toggle; in popout mode this is a one-way action,
-  // so drop the attribute rather than lie with "false"
-  if(fsMode === "popout") fsBtn.removeAttribute("aria-pressed");
-  else fsBtn.setAttribute("aria-pressed", on ? "true" : "false");
+  fsBtn.setAttribute("aria-pressed", on ? "true" : "false");
 }
 // there is no toast component in these activities, so the hint borrows the
 // button's own label for a few seconds
@@ -941,7 +948,7 @@ function fsHint(){
   fsLabelEl.textContent = FS.hint; fsBtn.title = FS.hint;
   clearTimeout(fsHintTimer); fsHintTimer = setTimeout(syncFsLabel, 4000);
 }
-function fsDemote(){ fsMode = fsCanPopOut ? "popout" : "hint"; syncFsLabel(); fsHint(); }
+function fsDemote(){ fsMode = "hint"; syncFsLabel(); fsHint(); }
 
 /* Scale the stage rather than stretch it. This is a fixed 920xH design, so
    plain fullscreen on a large monitor would just centre a postage stamp in a
@@ -954,11 +961,6 @@ function fitStage(){
 
 function toggleFullscreen(){
   if(fsMode === "hint"){ fsHint(); return; }
-  if(fsMode === "popout"){
-    // returns null when the iframe is sandboxed without allow-popups
-    if(!window.open(location.href, "_blank", "noopener")){ fsMode = "hint"; fsDemote(); }
-    return;
-  }
   if(fsEl()){ (document.exitFullscreen || document.webkitExitFullscreen).call(document); return; }
   /* documentElement, NOT .stage: element fullscreen forces width/height:100%
      over the fixed design and paints an opaque black ::backdrop, which would
